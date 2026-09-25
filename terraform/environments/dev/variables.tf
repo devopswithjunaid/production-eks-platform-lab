@@ -1,4 +1,4 @@
-# Root Variables
+# Root Variables — Development Environment
 #
 # These variables are declared here and set in terraform.tfvars.
 # Modules receive values through their own variable definitions.
@@ -42,13 +42,13 @@ variable "public_subnet_cidrs" {
   default     = ["10.20.0.0/24", "10.20.1.0/24", "10.20.2.0/24"]
 }
 
-variable "private_eks_cidrs" {
+variable "private_eks_subnet_cidrs" {
   description = "CIDR blocks for private EKS subnets (one per AZ)"
   type        = list(string)
   default     = ["10.20.16.0/20", "10.20.32.0/20", "10.20.48.0/20"]
 }
 
-variable "private_data_cidrs" {
+variable "private_data_subnet_cidrs" {
   description = "CIDR blocks for private data subnets (one per AZ)"
   type        = list(string)
   default     = ["10.20.64.0/24", "10.20.65.0/24", "10.20.66.0/24"]

@@ -1,14 +1,7 @@
 # Root Module — Development Environment
 #
-# This file calls all infrastructure modules in the correct order.
-#
-# DEPENDENCY ORDER:
+# This file calls all infrastructure modules in the correct dependency order:
 # KMS → VPC → Security → EKS → IAM → ECR
-#
-# KMS keys must exist before VPC (EBS encryption) and EKS (etcd encryption)
-# VPC must exist before EKS (needs subnet IDs)
-# Security Groups must exist before EKS (node SG)
-# EKS must exist before IAM Pod Identity associations
 
 # ─── Data Sources ─────────────────────────────────────────────────────────────
 
@@ -16,7 +9,6 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 # ─── KMS ──────────────────────────────────────────────────────────────────────
-# Must be created first — other modules reference KMS key ARNs
 
 module "kms" {
   source = "../../modules/kms"
@@ -31,14 +23,15 @@ module "kms" {
 module "vpc" {
   source = "../../modules/vpc"
 
-  environment         = var.environment
-  project             = var.project
-  vpc_cidr            = var.vpc_cidr
-  availability_zones  = var.availability_zones
-  public_subnet_cidrs = var.public_subnet_cidrs
-  private_eks_cidrs   = var.private_eks_cidrs
-  private_data_cidrs  = var.private_data_cidrs
-  single_nat_gateway  = var.single_nat_gateway
+  name                      = var.project
+  environment               = var.environment
+  cluster_name              = var.cluster_name
+  vpc_cidr                  = var.vpc_cidr
+  availability_zones        = var.availability_zones
+  public_subnet_cidrs       = var.public_subnet_cidrs
+  private_eks_subnet_cidrs  = var.private_eks_subnet_cidrs
+  private_data_subnet_cidrs = var.private_data_subnet_cidrs
+  single_nat_gateway        = var.single_nat_gateway
 
   depends_on = [module.kms]
 }

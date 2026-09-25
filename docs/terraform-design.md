@@ -7,14 +7,15 @@ Terraform state will not be stored locally.
 State will use:
 
 - Amazon S3 backend
-- DynamoDB state locking
+- S3-native state locking (`use_lockfile = true`)
+
+> **Note:** Terraform 1.10+ supports native S3 state locking using `.tflock` objects directly in S3 (`use_lockfile = true`), and HashiCorp has deprecated `dynamodb_table` locking. We use `use_lockfile = true` so no separate DynamoDB table is required.
 
 Reason:
 
-Multiple engineers can safely work on infrastructure.
+Multiple engineers can safely work on infrastructure without concurrent state corruption.
 
-State file contains sensitive infrastructure information
-and must be protected.
+State file contains sensitive infrastructure information and must be encrypted at rest and versioned in S3.
 
 ### State Architecture
 
@@ -24,11 +25,11 @@ Engineer / CI Pipeline
         ▼
    terraform apply
         │
-        ├──► DynamoDB Table (Acquire State Lock)
-        │    (Prevents concurrent execution)
+        ├──► Amazon S3 (.tflock file via use_lockfile = true)
+        │    (Acquires state lock — prevents concurrent execution)
         │
         └──► Amazon S3 Bucket (Read / Write terraform.tfstate)
-             (Encrypted at rest via KMS + Versioned)
+             (Encrypted at rest via KMS + S3 Versioning enabled)
 ```
 
 ---

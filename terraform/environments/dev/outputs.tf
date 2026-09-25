@@ -1,14 +1,15 @@
 # Outputs — Development Environment
-#
-# These values are displayed after terraform apply.
-# They are also available to other Terraform configurations
-# that reference this state as a data source.
 
 # ─── VPC ──────────────────────────────────────────────────────────────────────
 
 output "vpc_id" {
   description = "VPC ID"
   value       = module.vpc.vpc_id
+}
+
+output "vpc_cidr" {
+  description = "VPC CIDR block"
+  value       = module.vpc.vpc_cidr
 }
 
 output "public_subnet_ids" {
@@ -24,6 +25,16 @@ output "private_eks_subnet_ids" {
 output "private_data_subnet_ids" {
   description = "Private data subnet IDs (for RDS, ElastiCache)"
   value       = module.vpc.private_data_subnet_ids
+}
+
+output "nat_gateway_ids" {
+  description = "NAT Gateway IDs"
+  value       = module.vpc.nat_gateway_ids
+}
+
+output "availability_zones" {
+  description = "Configured Availability Zones"
+  value       = module.vpc.availability_zones
 }
 
 # ─── EKS ──────────────────────────────────────────────────────────────────────

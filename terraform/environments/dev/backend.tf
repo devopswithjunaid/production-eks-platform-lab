@@ -1,34 +1,26 @@
 # Terraform Backend Configuration
 #
-# Stores Terraform state in Amazon S3 with DynamoDB locking.
+# Stores Terraform state in Amazon S3 with S3-native state locking.
 #
-# WHY REMOTE STATE?
-# -----------------
-# Local state (terraform.tfstate) causes problems:
-#   - Two engineers applying at the same time = state corruption
-#   - State file contains sensitive data (passwords, keys, endpoints)
-#   - State is lost if the laptop is lost
+# WHY S3-NATIVE LOCKING (use_lockfile = true)?
+# --------------------------------------------
+# Modern Terraform supports native S3 state locking using a .tflock file
+# directly inside the S3 bucket (via conditional writes), deprecating
+# the legacy DynamoDB lock table approach.
 #
-# S3 backend solves all three:
-#   - S3 stores state safely and centrally
-#   - DynamoDB provides state locking (only one apply at a time)
-#   - S3 versioning allows state rollback if something goes wrong
-#
-# SETUP REQUIRED BEFORE USE:
-# ---------------------------
+# SETUP REQUIRED BEFORE REMOTE STATE INIT:
+# ----------------------------------------
 # 1. Create S3 bucket: production-eks-platform-lab-terraform-state
 # 2. Enable S3 versioning on the bucket
 # 3. Enable S3 server-side encryption (KMS)
-# 4. Create DynamoDB table: production-eks-platform-lab-terraform-locks
-#    Partition key: LockID (String)
-# 5. Run: terraform init
+# 4. Run: terraform init
 
 terraform {
   backend "s3" {
-    bucket         = "production-eks-platform-lab-terraform-state"
-    key            = "environments/dev/terraform.tfstate"
-    region         = "us-east-1"
-    encrypt        = true
-    dynamodb_table = "production-eks-platform-lab-terraform-locks"
+    bucket       = "production-eks-platform-lab-terraform-state"
+    key          = "environments/dev/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
   }
 }

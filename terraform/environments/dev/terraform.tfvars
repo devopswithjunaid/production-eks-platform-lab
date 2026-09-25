@@ -2,8 +2,7 @@
 # Values for all declared variables
 #
 # This file is committed to Git.
-# Do NOT put secrets here.
-# Secrets are managed via AWS Secrets Manager or environment variables.
+# Do NOT put AWS credentials or secrets here.
 
 # ─── Global ───────────────────────────────────────────────────────────────────
 environment = "dev"
@@ -20,13 +19,13 @@ public_subnet_cidrs = [
   "10.20.2.0/24"
 ]
 
-private_eks_cidrs = [
+private_eks_subnet_cidrs = [
   "10.20.16.0/20",
   "10.20.32.0/20",
   "10.20.48.0/20"
 ]
 
-private_data_cidrs = [
+private_data_subnet_cidrs = [
   "10.20.64.0/24",
   "10.20.65.0/24",
   "10.20.66.0/24"
