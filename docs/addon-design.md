@@ -1,300 +1,535 @@
-# Add-on Design
+# EKS Addon Design
 
-## Purpose
+## Overview
 
-This document catalogs every add-on that will be installed on the cluster,
-why it exists, who manages it, and how it is installed.
+Addons are components installed on top of the EKS cluster that
+provide functionality Kubernetes does not include by default.
+
+Without addons, a cluster can schedule pods but cannot:
+- Route internet traffic to pods (no load balancer controller)
+- Provision TLS certificates automatically (no cert-manager)
+- Deploy applications from Git (no Argo CD)
+- Store metrics (no Prometheus)
+- Detect runtime threats (no Falco)
+
+This document catalogs every addon, explains why it exists,
+who manages it, and in what order it is installed.
 
 ---
 
-## Add-on Categories
+## Installation Order
+
+The order matters — some addons depend on others.
 
 ```
-EKS Add-ons
-│
-├── AWS Managed Add-ons (via EKS API)
-│   ├── VPC CNI
-│   ├── CoreDNS
-│   ├── kube-proxy
-│   └── EBS CSI Driver
-│
-├── Networking
-│   ├── AWS Load Balancer Controller
-│   ├── ExternalDNS
-│   └── Cert Manager
-│
-├── GitOps
-│   ├── Argo CD
-│   └── Argo Rollouts
-│
-├── Security
-│   ├── HashiCorp Vault
-│   ├── Kyverno
-│   └── Falco
-│
-└── Monitoring
-    ├── Prometheus
-    ├── Grafana
-    ├── Alertmanager
-    ├── Loki
-    ├── Tempo
-    └── OpenTelemetry Collector
+Phase 1: AWS Managed Addons (Terraform)
+  VPC CNI → CoreDNS → kube-proxy → EBS CSI Driver
+  (Cluster is now functional)
+
+Phase 2: Networking (Helm via Terraform or manual bootstrap)
+  AWS Load Balancer Controller → ExternalDNS → Cert Manager
+  (Traffic routing is now functional)
+
+Phase 3: GitOps Bootstrap (Helm — manual first time)
+  Argo CD
+  (GitOps is now functional)
+
+Phase 4: Everything else (Argo CD ApplicationSets)
+  Security + Monitoring + Application addons
+  (All managed declaratively via Git)
 ```
 
 ---
 
-## AWS Managed Add-ons
+## AWS Managed Addons
+
+These are installed and updated via the EKS API.
+Terraform manages them using `aws_eks_addon` resource.
+
+---
 
 ### VPC CNI (aws-node)
 
-| Property    | Value                                         |
-|-------------|-----------------------------------------------|
-| Managed by  | AWS EKS managed add-on                        |
-| Installed   | Terraform (aws_eks_addon resource)            |
-| Purpose     | Assigns real VPC IP addresses to every Pod    |
+| Property       | Value                                          |
+|----------------|------------------------------------------------|
+| Managed by     | AWS EKS managed addon (Terraform)              |
+| Namespace      | kube-system                                    |
+| Type           | DaemonSet (runs on every node)                 |
+| Install phase  | Phase 1 — before any workloads                 |
 
-Every Pod gets a real VPC subnet IP. This enables direct VPC-native
-routing without overlay networks. Required for EKS.
+**Purpose:**
+
+Assigns real VPC IP addresses to every Kubernetes Pod.
+
+Without VPC CNI, pods cannot get IP addresses and cannot communicate.
+This is the foundational networking plugin for EKS — nothing works without it.
+
+**Why it matters:**
+
+```
+Without VPC CNI:
+Pod has no IP address → Pod cannot communicate → Cluster unusable
+
+With VPC CNI:
+Pod gets real VPC IP → Pod is routable in VPC → Services communicate
+```
+
+Every node pre-allocates a pool of IPs from the subnet.
+This is why EKS subnets must be large (/20 = 4096 IPs).
 
 ---
 
 ### CoreDNS
 
-| Property    | Value                                         |
-|-------------|-----------------------------------------------|
-| Managed by  | AWS EKS managed add-on                        |
-| Installed   | Terraform                                     |
-| Purpose     | Cluster DNS — resolves service names to IPs   |
+| Property       | Value                                          |
+|----------------|------------------------------------------------|
+| Managed by     | AWS EKS managed addon (Terraform)              |
+| Namespace      | kube-system                                    |
+| Type           | Deployment (2 replicas minimum)                |
+| Install phase  | Phase 1                                        |
 
-Every Kubernetes Service gets a DNS name:
-`<service>.<namespace>.svc.cluster.local`
+**Purpose:**
 
-CoreDNS resolves these names to ClusterIP addresses.
-Without CoreDNS, inter-service communication by name breaks completely.
+Cluster-internal DNS resolution.
+
+Every Kubernetes Service gets a DNS name automatically:
+```
+<service>.<namespace>.svc.cluster.local
+```
+
+Without CoreDNS, services cannot find each other by name.
+Hardcoding Pod IPs is not viable — they change every restart.
+
+**Example:**
+```
+checkout-service calls: http://payment-service.dev.svc.cluster.local:8080
+CoreDNS resolves it to: 172.20.14.25 (ClusterIP)
+kube-proxy routes it to: actual pod IP
+```
 
 ---
 
 ### kube-proxy
 
-| Property    | Value                                         |
-|-------------|-----------------------------------------------|
-| Managed by  | AWS EKS managed add-on                        |
-| Installed   | Terraform                                     |
-| Purpose     | Manages iptables rules for Service routing    |
+| Property       | Value                                          |
+|----------------|------------------------------------------------|
+| Managed by     | AWS EKS managed addon (Terraform)              |
+| Namespace      | kube-system                                    |
+| Type           | DaemonSet (runs on every node)                 |
+| Install phase  | Phase 1                                        |
 
-kube-proxy runs as a DaemonSet on every node. It translates
-ClusterIP Service addresses to Pod IPs using iptables rules.
+**Purpose:**
+
+Manages iptables rules on every node for Service routing.
+
+When a pod sends traffic to a ClusterIP, kube-proxy's iptables rules
+translate that ClusterIP to a real Pod IP and load balance across replicas.
+
+Without kube-proxy, Kubernetes Services do not work.
 
 ---
 
 ### EBS CSI Driver
 
-| Property    | Value                                         |
-|-------------|-----------------------------------------------|
-| Managed by  | AWS EKS managed add-on                        |
-| Installed   | Terraform                                     |
-| Purpose     | Enables EBS volumes as PersistentVolumes       |
+| Property       | Value                                          |
+|----------------|------------------------------------------------|
+| Managed by     | AWS EKS managed addon (Terraform)              |
+| Namespace      | kube-system                                    |
+| Type           | DaemonSet + Deployment                         |
+| Install phase  | Phase 1                                        |
 
-Required for any stateful workload that needs persistent disk storage.
-Prometheus uses EBS for metric storage.
+**Purpose:**
+
+Enables EBS volumes as Kubernetes PersistentVolumes.
+
+Required for any stateful workload:
+- Prometheus metrics storage
+- Loki log storage
+- Any StatefulSet requiring persistent disk
+
+Without EBS CSI Driver, PersistentVolumeClaims remain Pending
+and stateful workloads cannot start.
 
 ---
 
-## Networking Add-ons
+## Networking Addons
+
+These are installed after the cluster is functional.
+Managed by Helm charts — eventually by Argo CD.
+
+---
 
 ### AWS Load Balancer Controller
 
-| Property    | Value                                         |
-|-------------|-----------------------------------------------|
-| Managed by  | Helm (Argo CD managed)                        |
-| Namespace   | kube-system                                   |
-| Node group  | system-node-group                             |
-| Purpose     | Creates ALBs and NLBs from Kubernetes Ingress |
+| Property       | Value                                          |
+|----------------|------------------------------------------------|
+| Managed by     | Helm (Argo CD after bootstrap)                 |
+| Namespace      | kube-system                                    |
+| Node group     | system-node-group                              |
+| Install phase  | Phase 2                                        |
+| IAM            | Pod Identity → eks-load-balancer-controller-role|
 
-When an Ingress resource is created, this controller provisions
-an Application Load Balancer in AWS automatically.
-The controller uses EKS Pod Identity to call the AWS ELB API.
+**Purpose:**
+
+Creates and manages AWS Application Load Balancers from
+Kubernetes Ingress resources.
+
+Without this controller:
+- Kubernetes Ingress objects do nothing in AWS
+- No external traffic can reach pods
+- Applications are inaccessible from the internet
+
+With this controller:
+```
+Developer creates Kubernetes Ingress
+          │
+          ▼
+AWS Load Balancer Controller detects it
+          │
+          ▼
+Controller calls AWS ELB API
+          │
+          ▼
+ALB created in public subnets
+          │
+          ▼
+Internet traffic routed to pods
+```
 
 ---
 
 ### ExternalDNS
 
-| Property    | Value                                         |
-|-------------|-----------------------------------------------|
-| Managed by  | Helm (Argo CD managed)                        |
-| Namespace   | kube-system                                   |
-| Node group  | system-node-group                             |
-| Purpose     | Creates Route 53 records for Ingress/Services |
+| Property       | Value                                          |
+|----------------|------------------------------------------------|
+| Managed by     | Helm (Argo CD)                                 |
+| Namespace      | kube-system                                    |
+| Node group     | system-node-group                              |
+| Install phase  | Phase 2                                        |
+| IAM            | Pod Identity → eks-external-dns-role           |
 
-When an Ingress is annotated, ExternalDNS automatically creates or
-updates the Route 53 DNS record to point to the ALB DNS name.
+**Purpose:**
+
+Automatically creates Route 53 DNS records from Kubernetes Ingress
+and Service annotations.
+
+Without ExternalDNS, engineers must manually create Route 53 records
+every time a new service is deployed. Error-prone and slow.
+
+With ExternalDNS:
+```
+Ingress annotated with: external-dns.alpha.kubernetes.io/hostname: app.example.com
+          │
+          ▼
+ExternalDNS detects the annotation
+          │
+          ▼
+ExternalDNS creates Route53 A record: app.example.com → ALB DNS name
+          │
+          ▼
+DNS propagates automatically
+```
 
 ---
 
 ### Cert Manager
 
-| Property    | Value                                         |
-|-------------|-----------------------------------------------|
-| Managed by  | Helm (Argo CD managed)                        |
-| Namespace   | cert-manager                                  |
-| Node group  | system-node-group                             |
-| Purpose     | Automatic TLS certificate provisioning        |
+| Property       | Value                                          |
+|----------------|------------------------------------------------|
+| Managed by     | Helm (Argo CD)                                 |
+| Namespace      | cert-manager                                   |
+| Node group     | system-node-group                              |
+| Install phase  | Phase 2                                        |
+| IAM            | Pod Identity → eks-cert-manager-role           |
 
-Provisions TLS certificates from Let's Encrypt using DNS-01 validation
-via Route 53. Certificates are stored as Kubernetes Secrets and
-automatically renewed before expiry.
+**Purpose:**
+
+Automatically provisions and renews TLS certificates from Let's Encrypt.
+
+Without Cert Manager, engineers manually request, install, and renew
+certificates. Certificates expire and cause outages if forgotten.
+
+With Cert Manager:
+```
+Ingress annotated with: cert-manager.io/cluster-issuer: letsencrypt-prod
+          │
+          ▼
+Cert Manager detects it
+          │
+          ▼
+Requests certificate from Let's Encrypt
+using Route 53 DNS validation
+          │
+          ▼
+Certificate stored as Kubernetes Secret
+          │
+          ▼
+Certificate auto-renewed 30 days before expiry
+```
 
 ---
 
-## GitOps Add-ons
+## GitOps Addons
+
+---
 
 ### Argo CD
 
-| Property    | Value                                         |
-|-------------|-----------------------------------------------|
-| Managed by  | Helm (bootstrapped via Terraform or manually) |
-| Namespace   | argocd                                        |
-| Node group  | system-node-group                             |
-| Purpose     | GitOps continuous delivery for all workloads  |
+| Property       | Value                                          |
+|----------------|------------------------------------------------|
+| Managed by     | Helm (bootstrapped first time manually/Terraform)|
+| Namespace      | argocd                                         |
+| Node group     | system-node-group                              |
+| Install phase  | Phase 3                                        |
 
-Argo CD watches the GitOps repository. When desired state in Git
-differs from actual state in the cluster, Argo CD reconciles
-the cluster back to the desired state automatically.
+**Purpose:**
 
-After Argo CD is installed, it manages all other add-ons via
-ApplicationSets.
+GitOps continuous delivery — deploys and reconciles all Kubernetes workloads
+from Git as the single source of truth.
+
+After Argo CD is installed, it manages ALL other addons via ApplicationSets.
+The cluster becomes self-managing — any drift from Git is auto-corrected.
+
+```
+Git repository (desired state)
+          │
+          ▼
+Argo CD watches for changes
+          │
+          ▼
+Cluster drift detected
+          │
+          ▼
+Argo CD reconciles cluster to match Git
+          │
+          ▼
+Cluster matches desired state
+```
 
 ---
 
 ### Argo Rollouts
 
-| Property    | Value                                         |
-|-------------|-----------------------------------------------|
-| Managed by  | Argo CD ApplicationSet                        |
-| Namespace   | argo-rollouts                                 |
-| Node group  | system-node-group                             |
-| Purpose     | Canary and Blue/Green deployment strategies   |
+| Property       | Value                                          |
+|----------------|------------------------------------------------|
+| Managed by     | Argo CD ApplicationSet                         |
+| Namespace      | argo-rollouts                                  |
+| Node group     | system-node-group                              |
+| Install phase  | Phase 4                                        |
 
-Extends Kubernetes Deployments with advanced rollout strategies.
-Enables progressive delivery with automatic rollback on failure metrics.
+**Purpose:**
+
+Advanced deployment strategies — canary and blue/green deployments.
+
+Standard Kubernetes Deployments do all-at-once rolling updates.
+Argo Rollouts allows:
+
+```
+New version deployed to 10% of traffic
+          │
+    ┌─────▼──────┐
+    │  Metrics OK?│
+    └─────┬──────┘
+    Yes   │    No
+          │         └──► Automatic rollback
+          ▼
+Deploy to 50% of traffic
+          │
+    ┌─────▼──────┐
+    │  Metrics OK?│
+    └─────┬──────┘
+          │
+          ▼
+Deploy to 100% of traffic
+```
 
 ---
 
-## Security Add-ons
+## Security Addons
+
+---
 
 ### HashiCorp Vault
 
-| Property    | Value                                         |
-|-------------|-----------------------------------------------|
-| Managed by  | Argo CD                                       |
-| Namespace   | vault                                         |
-| Node group  | security-node-group                           |
-| Purpose     | Centralized dynamic secret management         |
+| Property       | Value                                          |
+|----------------|------------------------------------------------|
+| Managed by     | Argo CD                                        |
+| Namespace      | vault                                          |
+| Node group     | system-node-group                              |
+| Install phase  | Phase 4 (after studying K8s Secrets)           |
 
-Vault will be introduced after studying Kubernetes-native Secrets.
-Provides dynamic credentials, secret versioning, audit logging, and
-fine-grained access policies.
+**Purpose:**
+
+Centralized secret management with dynamic credentials, audit logging,
+secret versioning, and fine-grained access control.
+
+Introduced after we understand Kubernetes-native Secrets and their limitations.
 
 ---
 
 ### Kyverno
 
-| Property    | Value                                         |
-|-------------|-----------------------------------------------|
-| Managed by  | Argo CD                                       |
-| Namespace   | kyverno                                       |
-| Node group  | security-node-group                           |
-| Purpose     | Kubernetes-native admission policy engine     |
+| Property       | Value                                          |
+|----------------|------------------------------------------------|
+| Managed by     | Argo CD                                        |
+| Namespace      | kyverno                                        |
+| Node group     | system-node-group                              |
+| Install phase  | Phase 4                                        |
 
-Enforces policies such as:
-- All containers must define resource limits
-- Images must be signed
-- No privileged containers
-- Labels must be present
+**Purpose:**
 
-Kyverno can also generate and mutate resources on admission.
+Kubernetes-native policy engine — admission control.
+
+Example policies enforced at admission time:
+
+```
+DENY: Pods without resource limits
+DENY: Privileged containers
+DENY: Images from untrusted registries
+DENY: Missing required labels
+MUTATE: Add default security context to all pods
+GENERATE: Create default NetworkPolicy for new namespaces
+```
+
+Kyverno stops bad configurations before they reach the cluster.
 
 ---
 
 ### Falco
 
-| Property    | Value                                         |
-|-------------|-----------------------------------------------|
-| Managed by  | Argo CD                                       |
-| Namespace   | security                                      |
-| Node group  | security-node-group                           |
-| Purpose     | Runtime threat detection                      |
-| Type        | DaemonSet (runs on every node)                |
+| Property       | Value                                          |
+|----------------|------------------------------------------------|
+| Managed by     | Argo CD                                        |
+| Namespace      | security                                       |
+| Node group     | system-node-group                              |
+| Type           | DaemonSet (runs on every node)                 |
+| Install phase  | Phase 4                                        |
 
-Falco monitors system calls at the kernel level and alerts on
-suspicious behaviour such as:
-- Shell spawned inside a container
-- Unexpected network connections
-- File access in sensitive directories
+**Purpose:**
+
+Runtime threat detection at the kernel syscall level.
+
+Falco watches system calls in real time and alerts on:
+
+```
+ALERT: Shell spawned inside a container
+ALERT: Unexpected network connection from pod
+ALERT: File write in /etc or /bin
+ALERT: Privilege escalation attempt
+ALERT: Container reading sensitive host path
+```
+
+Kyverno prevents bad configs at admission.
+Falco detects bad behaviour at runtime.
+Both layers are necessary.
 
 ---
 
-## Monitoring Add-ons
+## Observability Addons
+
+---
 
 ### Prometheus
 
-| Property    | Value                              |
-|-------------|-------------------------------------|
-| Managed by  | Argo CD (kube-prometheus-stack)     |
-| Namespace   | monitoring                          |
-| Node group  | monitoring-node-group               |
-| Purpose     | Metrics collection and storage      |
-| Type        | StatefulSet (persistent EBS storage)|
+| Property   | Value                                          |
+|------------|------------------------------------------------|
+| Managed by | Argo CD (kube-prometheus-stack Helm chart)     |
+| Namespace  | monitoring                                     |
+| Node group | monitoring-node-group                          |
+| Type       | StatefulSet with EBS persistent storage        |
+
+**Purpose:** Metrics scraping, storage, and alerting rules.
 
 ---
 
 ### Grafana
 
-| Property    | Value                              |
-|-------------|-------------------------------------|
-| Managed by  | Argo CD (kube-prometheus-stack)     |
-| Namespace   | monitoring                          |
-| Node group  | monitoring-node-group               |
-| Purpose     | Metrics dashboards and visualization|
+| Property   | Value                                          |
+|------------|------------------------------------------------|
+| Managed by | Argo CD (kube-prometheus-stack)                |
+| Namespace  | monitoring                                     |
+| Node group | monitoring-node-group                          |
+
+**Purpose:** Metrics dashboards and visualization.
 
 ---
 
 ### Alertmanager
 
-| Property    | Value                              |
-|-------------|-------------------------------------|
-| Managed by  | Argo CD (kube-prometheus-stack)     |
-| Namespace   | monitoring                          |
-| Node group  | monitoring-node-group               |
-| Purpose     | Alert routing and notification      |
+| Property   | Value                                          |
+|------------|------------------------------------------------|
+| Managed by | Argo CD (kube-prometheus-stack)                |
+| Namespace  | monitoring                                     |
+| Node group | monitoring-node-group                          |
+
+**Purpose:** Alert routing — sends alerts to Slack, PagerDuty, email.
 
 ---
 
 ### Loki
 
-| Property    | Value                              |
-|-------------|-------------------------------------|
-| Managed by  | Argo CD (loki-stack)                |
-| Namespace   | monitoring                          |
-| Node group  | monitoring-node-group               |
-| Purpose     | Log aggregation and querying        |
+| Property   | Value                                          |
+|------------|------------------------------------------------|
+| Managed by | Argo CD (loki-stack Helm chart)                |
+| Namespace  | monitoring                                     |
+| Node group | monitoring-node-group                          |
+| Type       | StatefulSet with EBS persistent storage        |
+
+**Purpose:** Log aggregation — collects and indexes logs from all pods.
+
+---
+
+### Tempo
+
+| Property   | Value                                          |
+|------------|------------------------------------------------|
+| Managed by | Argo CD                                        |
+| Namespace  | monitoring                                     |
+| Node group | monitoring-node-group                          |
+
+**Purpose:** Distributed trace storage — stores traces from OpenTelemetry.
 
 ---
 
 ### OpenTelemetry Collector
 
-| Property    | Value                              |
-|-------------|-------------------------------------|
-| Managed by  | Argo CD                             |
-| Namespace   | monitoring                          |
-| Node group  | monitoring-node-group               |
-| Purpose     | Distributed tracing collection      |
+| Property   | Value                                          |
+|------------|------------------------------------------------|
+| Managed by | Argo CD                                        |
+| Namespace  | monitoring                                     |
+| Node group | monitoring-node-group                          |
+
+**Purpose:**
+
+Single collection pipeline for all three observability signals:
+- Receives traces from application pods → forwards to Tempo
+- Receives metrics → forwards to Prometheus
+- Receives logs → forwards to Loki
+
+Applications send all telemetry to one endpoint.
+The Collector fans it out to the right backend.
 
 ---
 
-## Add-on Installation Order
+## Addon Summary Table
 
-1. VPC CNI, CoreDNS, kube-proxy, EBS CSI (Terraform — before cluster is usable)
-2. AWS Load Balancer Controller (Helm — needed before Ingress works)
-3. Argo CD (Helm — bootstrapped manually or via Terraform)
-4. All remaining add-ons (Argo CD ApplicationSets — GitOps managed)
+| Addon                      | Category    | Managed By      | Node Group     | Phase |
+|----------------------------|-------------|-----------------|----------------|-------|
+| VPC CNI                    | AWS Managed | Terraform        | All nodes      | 1     |
+| CoreDNS                    | AWS Managed | Terraform        | System         | 1     |
+| kube-proxy                 | AWS Managed | Terraform        | All nodes      | 1     |
+| EBS CSI Driver             | AWS Managed | Terraform        | System         | 1     |
+| AWS Load Balancer Controller| Networking  | Argo CD         | System         | 2     |
+| ExternalDNS                | Networking  | Argo CD          | System         | 2     |
+| Cert Manager               | Networking  | Argo CD          | System         | 2     |
+| Argo CD                    | GitOps      | Helm (bootstrap) | System         | 3     |
+| Argo Rollouts              | GitOps      | Argo CD          | System         | 4     |
+| HashiCorp Vault            | Security    | Argo CD          | System         | 4     |
+| Kyverno                    | Security    | Argo CD          | System         | 4     |
+| Falco                      | Security    | Argo CD          | System         | 4     |
+| Prometheus                 | Monitoring  | Argo CD          | Monitoring     | 4     |
+| Grafana                    | Monitoring  | Argo CD          | Monitoring     | 4     |
+| Alertmanager               | Monitoring  | Argo CD          | Monitoring     | 4     |
+| Loki                       | Monitoring  | Argo CD          | Monitoring     | 4     |
+| Tempo                      | Monitoring  | Argo CD          | Monitoring     | 4     |
+| OpenTelemetry Collector    | Monitoring  | Argo CD          | Monitoring     | 4     |
