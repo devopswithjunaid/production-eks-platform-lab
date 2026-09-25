@@ -56,6 +56,21 @@ output "cluster_ca_certificate" {
   sensitive   = true
 }
 
+output "cluster_security_group_id" {
+  description = "EKS control plane security group ID"
+  value       = module.eks.cluster_security_group_id
+}
+
+output "node_security_group_id" {
+  description = "EKS worker node security group ID"
+  value       = module.eks.node_security_group_id
+}
+
+output "node_group_names" {
+  description = "EKS managed node group names"
+  value       = module.eks.node_group_names
+}
+
 # ─── ECR ──────────────────────────────────────────────────────────────────────
 
 output "ecr_repository_urls" {
@@ -68,6 +83,11 @@ output "ecr_repository_urls" {
 output "github_actions_role_arn" {
   description = "IAM Role ARN for GitHub Actions OIDC authentication"
   value       = module.iam.github_actions_role_arn
+}
+
+output "platform_admin_role_arn" {
+  description = "IAM Role ARN for PlatformAdmin EKS access entry"
+  value       = module.iam.platform_admin_role_arn
 }
 
 # ─── KMS ──────────────────────────────────────────────────────────────────────

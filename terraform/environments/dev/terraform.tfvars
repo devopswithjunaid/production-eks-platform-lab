@@ -1,8 +1,5 @@
 # Environment: Development
 # Values for all declared variables
-#
-# This file is committed to Git.
-# Do NOT put AWS credentials or secrets here.
 
 # ─── Global ───────────────────────────────────────────────────────────────────
 environment = "dev"
@@ -31,13 +28,85 @@ private_data_subnet_cidrs = [
   "10.20.66.0/24"
 ]
 
-# Development: single NAT Gateway (cost optimized)
-# Production:  set to false → one NAT Gateway per AZ
 single_nat_gateway = true
 
-# ─── EKS ──────────────────────────────────────────────────────────────────────
-cluster_name       = "production-eks-dev"
-kubernetes_version = "1.31"
+# ─── EKS Control Plane & API Endpoint ─────────────────────────────────────────
+cluster_name            = "production-eks-dev"
+kubernetes_version      = "1.31"
+endpoint_private_access = true
+endpoint_public_access  = true
+
+# Restricted administrative CIDR list (replace with admin public IP/32 before apply)
+public_access_cidrs = [
+  "139.135.32.172/32"
+]
+
+service_ipv4_cidr = "172.20.0.0/16"
+
+enabled_cluster_log_types = [
+  "api",
+  "audit",
+  "authenticator",
+  "controllerManager",
+  "scheduler"
+]
+
+# ─── EKS Managed Node Groups (System, Application, Monitoring) ────────────────
+node_groups = {
+  system = {
+    instance_types = ["t3.medium"]
+    capacity_type  = "ON_DEMAND"
+    disk_size      = 20
+    min_size       = 2
+    desired_size   = 2
+    max_size       = 4
+    labels = {
+      "workload"   = "system"
+      "node-group" = "system"
+    }
+    taints = [
+      {
+        key    = "workload"
+        value  = "system"
+        effect = "NoSchedule"
+      }
+    ]
+  }
+
+  application = {
+    instance_types = ["t3.large"]
+    capacity_type  = "ON_DEMAND"
+    disk_size      = 20
+    min_size       = 2
+    desired_size   = 2
+    max_size       = 8
+    labels = {
+      "workload"   = "application"
+      "node-group" = "application"
+    }
+    taints = []
+  }
+
+  monitoring = {
+    instance_types = ["t3.large"]
+    capacity_type  = "ON_DEMAND"
+    disk_size      = 50
+    min_size       = 1
+    desired_size   = 1
+    max_size       = 3
+    labels = {
+      "workload"   = "monitoring"
+      "node-group" = "monitoring"
+    }
+    taints = [
+      {
+        key    = "workload"
+        value  = "monitoring"
+        effect = "NoSchedule"
+      }
+    ]
+  }
+}
 
 # ─── GitHub OIDC ──────────────────────────────────────────────────────────────
 github_org  = "devopswithjunaid"

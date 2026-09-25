@@ -1,7 +1,9 @@
 # Root Module — Development Environment
 #
-# This file calls all infrastructure modules in the correct dependency order:
-# KMS → VPC → Security → EKS → IAM → ECR
+# Dependency graph:
+#   module.kms ──┬──► module.vpc ──┐
+#                │                 ├──► module.eks
+#                └──► module.iam ──┘
 
 # ─── Data Sources ─────────────────────────────────────────────────────────────
 
@@ -36,6 +38,61 @@ module "vpc" {
   depends_on = [module.kms]
 }
 
+# ─── IAM (Human Access Roles & GitHub OIDC) ───────────────────────────────────
+
+module "iam" {
+  source = "../../modules/iam"
+
+  environment    = var.environment
+  project        = var.project
+  github_org     = var.github_org
+  github_repo    = var.github_repo
+  aws_account_id = data.aws_caller_identity.current.account_id
+}
+
+# ─── EKS ──────────────────────────────────────────────────────────────────────
+
+module "eks" {
+  source = "../../modules/eks"
+
+  cluster_name              = var.cluster_name
+  cluster_version           = var.kubernetes_version
+  environment               = var.environment
+  project                   = var.project
+  vpc_id                    = module.vpc.vpc_id
+  subnet_ids                = module.vpc.private_eks_subnet_ids
+  endpoint_private_access   = var.endpoint_private_access
+  endpoint_public_access    = var.endpoint_public_access
+  public_access_cidrs       = var.public_access_cidrs
+  service_ipv4_cidr         = var.service_ipv4_cidr
+  enabled_cluster_log_types = var.enabled_cluster_log_types
+  kms_key_arn               = module.kms.eks_key_arn
+  node_groups               = var.node_groups
+
+  access_entries = {
+    platform_admin = {
+      principal_arn     = module.iam.platform_admin_role_arn
+      policy_arn        = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+      access_scope_type = "cluster"
+      namespaces        = []
+    }
+    developer = {
+      principal_arn     = module.iam.developer_role_arn
+      policy_arn        = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy"
+      access_scope_type = "namespace"
+      namespaces        = ["dev"]
+    }
+    readonly = {
+      principal_arn     = module.iam.readonly_role_arn
+      policy_arn        = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy"
+      access_scope_type = "cluster"
+      namespaces        = []
+    }
+  }
+
+  depends_on = [module.vpc, module.iam, module.kms]
+}
+
 # ─── Security ─────────────────────────────────────────────────────────────────
 
 module "security" {
@@ -47,38 +104,6 @@ module "security" {
   kms_key_arn = module.kms.eks_key_arn
 
   depends_on = [module.vpc]
-}
-
-# ─── EKS ──────────────────────────────────────────────────────────────────────
-
-module "eks" {
-  source = "../../modules/eks"
-
-  cluster_name           = var.cluster_name
-  kubernetes_version     = var.kubernetes_version
-  environment            = var.environment
-  project                = var.project
-  vpc_id                 = module.vpc.vpc_id
-  private_subnet_ids     = module.vpc.private_eks_subnet_ids
-  node_security_group_id = module.security.eks_node_security_group_id
-  kms_key_arn            = module.kms.eks_key_arn
-
-  depends_on = [module.vpc, module.security, module.kms]
-}
-
-# ─── IAM ──────────────────────────────────────────────────────────────────────
-
-module "iam" {
-  source = "../../modules/iam"
-
-  environment    = var.environment
-  project        = var.project
-  github_org     = var.github_org
-  github_repo    = var.github_repo
-  cluster_name   = module.eks.cluster_name
-  aws_account_id = data.aws_caller_identity.current.account_id
-
-  depends_on = [module.eks]
 }
 
 # ─── ECR ──────────────────────────────────────────────────────────────────────
