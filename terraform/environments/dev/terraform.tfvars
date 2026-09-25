@@ -68,7 +68,7 @@ node_groups = {
       {
         key    = "workload"
         value  = "system"
-        effect = "NoSchedule"
+        effect = "NO_SCHEDULE"
       }
     ]
   }
@@ -102,7 +102,7 @@ node_groups = {
       {
         key    = "workload"
         value  = "monitoring"
-        effect = "NoSchedule"
+        effect = "NO_SCHEDULE"
       }
     ]
   }
