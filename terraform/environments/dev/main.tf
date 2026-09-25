@@ -61,14 +61,14 @@ module "security" {
 module "eks" {
   source = "../../modules/eks"
 
-  cluster_name            = var.cluster_name
-  kubernetes_version      = var.kubernetes_version
-  environment             = var.environment
-  project                 = var.project
-  vpc_id                  = module.vpc.vpc_id
-  private_subnet_ids      = module.vpc.private_eks_subnet_ids
-  node_security_group_id  = module.security.eks_node_security_group_id
-  kms_key_arn             = module.kms.eks_key_arn
+  cluster_name           = var.cluster_name
+  kubernetes_version     = var.kubernetes_version
+  environment            = var.environment
+  project                = var.project
+  vpc_id                 = module.vpc.vpc_id
+  private_subnet_ids     = module.vpc.private_eks_subnet_ids
+  node_security_group_id = module.security.eks_node_security_group_id
+  kms_key_arn            = module.kms.eks_key_arn
 
   depends_on = [module.vpc, module.security, module.kms]
 }
