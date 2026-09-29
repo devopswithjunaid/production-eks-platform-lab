@@ -83,18 +83,18 @@ variable "endpoint_public_access" {
 }
 
 variable "public_access_cidrs" {
-  description = "Restricted CIDR blocks permitted to reach the public EKS API endpoint"
+  description = "Trusted CIDR blocks permitted to reach the public EKS API endpoint"
   type        = list(string)
 }
 
 variable "service_ipv4_cidr" {
-  description = "Kubernetes Service IPv4 CIDR"
+  description = "Kubernetes Service IPv4 CIDR (must not overlap VPC CIDR)"
   type        = string
   default     = "172.20.0.0/16"
 }
 
 variable "enabled_cluster_log_types" {
-  description = "Control plane log streams enabled for CloudWatch"
+  description = "Control plane log streams sent to CloudWatch"
   type        = list(string)
   default = [
     "api",
@@ -106,7 +106,7 @@ variable "enabled_cluster_log_types" {
 }
 
 variable "node_groups" {
-  description = "Managed node group configurations (system, application, monitoring)"
+  description = "Managed node group configurations"
   type = map(object({
     instance_types = list(string)
     capacity_type  = string
@@ -121,6 +121,14 @@ variable "node_groups" {
       effect = string
     })), [])
   }))
+}
+
+# ─── Security ─────────────────────────────────────────────────────────────────
+
+variable "enable_guardduty" {
+  description = "Enable GuardDuty threat detection"
+  type        = bool
+  default     = true
 }
 
 # ─── GitHub (for OIDC IAM Role) ───────────────────────────────────────────────

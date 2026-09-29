@@ -13,28 +13,23 @@ output "vpc_cidr" {
 }
 
 output "public_subnet_ids" {
-  description = "Public subnet IDs (for ALB and NAT Gateway)"
+  description = "Public subnet IDs (ALB & NAT Gateway)"
   value       = module.vpc.public_subnet_ids
 }
 
 output "private_eks_subnet_ids" {
-  description = "Private EKS subnet IDs (for worker nodes)"
+  description = "Private EKS subnet IDs (worker nodes)"
   value       = module.vpc.private_eks_subnet_ids
 }
 
 output "private_data_subnet_ids" {
-  description = "Private data subnet IDs (for RDS, ElastiCache)"
+  description = "Private data subnet IDs (RDS, ElastiCache)"
   value       = module.vpc.private_data_subnet_ids
 }
 
 output "nat_gateway_ids" {
   description = "NAT Gateway IDs"
   value       = module.vpc.nat_gateway_ids
-}
-
-output "availability_zones" {
-  description = "Configured Availability Zones"
-  value       = module.vpc.availability_zones
 }
 
 # ─── EKS ──────────────────────────────────────────────────────────────────────
@@ -71,6 +66,23 @@ output "node_group_names" {
   value       = module.eks.node_group_names
 }
 
+# ─── Security ─────────────────────────────────────────────────────────────────
+
+output "eks_auth_endpoint_id" {
+  description = "VPC endpoint ID for EKS Auth API (Pod Identity)"
+  value       = module.security.eks_auth_endpoint_id
+}
+
+output "cloudtrail_arn" {
+  description = "CloudTrail trail ARN"
+  value       = module.security.cloudtrail_arn
+}
+
+output "guardduty_detector_id" {
+  description = "GuardDuty detector ID"
+  value       = module.security.guardduty_detector_id
+}
+
 # ─── ECR ──────────────────────────────────────────────────────────────────────
 
 output "ecr_repository_urls" {
@@ -81,19 +93,19 @@ output "ecr_repository_urls" {
 # ─── IAM ──────────────────────────────────────────────────────────────────────
 
 output "github_actions_role_arn" {
-  description = "IAM Role ARN for GitHub Actions OIDC authentication"
+  description = "IAM Role ARN for GitHub Actions OIDC"
   value       = module.iam.github_actions_role_arn
 }
 
 output "platform_admin_role_arn" {
-  description = "IAM Role ARN for PlatformAdmin EKS access entry"
+  description = "IAM Role ARN for PlatformAdmin EKS access"
   value       = module.iam.platform_admin_role_arn
 }
 
 # ─── KMS ──────────────────────────────────────────────────────────────────────
 
 output "eks_kms_key_arn" {
-  description = "KMS key ARN used for EKS secrets encryption"
+  description = "KMS key ARN for EKS secrets encryption"
   value       = module.kms.eks_key_arn
   sensitive   = true
 }

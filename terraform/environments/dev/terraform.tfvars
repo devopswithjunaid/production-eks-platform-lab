@@ -1,5 +1,5 @@
-# Environment: Development
-# Values for all declared variables
+# Environment: Development — terraform.tfvars
+# Do NOT put AWS credentials, passwords, or secrets here.
 
 # ─── Global ───────────────────────────────────────────────────────────────────
 environment = "dev"
@@ -28,18 +28,18 @@ private_data_subnet_cidrs = [
   "10.20.66.0/24"
 ]
 
+# Dev: single NAT Gateway (cost optimized)
+# Prod: set false → one NAT per AZ (HA)
 single_nat_gateway = true
 
-# ─── EKS Control Plane & API Endpoint ─────────────────────────────────────────
+# ─── EKS ──────────────────────────────────────────────────────────────────────
 cluster_name            = "production-eks-dev"
 kubernetes_version      = "1.31"
 endpoint_private_access = true
 endpoint_public_access  = true
 
-# Restricted administrative CIDR list (replace with admin public IP/32 before apply)
-public_access_cidrs = [
-  "139.135.32.172/32"
-]
+# Restrict API access to trusted admin CIDR — replace with your public IP/32
+public_access_cidrs = ["0.0.0.0/0"]
 
 service_ipv4_cidr = "172.20.0.0/16"
 
@@ -51,7 +51,7 @@ enabled_cluster_log_types = [
   "scheduler"
 ]
 
-# ─── EKS Managed Node Groups (System, Application, Monitoring) ────────────────
+# ─── EKS Managed Node Groups ──────────────────────────────────────────────────
 node_groups = {
   system = {
     instance_types = ["t3.medium"]
@@ -107,6 +107,9 @@ node_groups = {
     ]
   }
 }
+
+# ─── Security ─────────────────────────────────────────────────────────────────
+enable_guardduty = true
 
 # ─── GitHub OIDC ──────────────────────────────────────────────────────────────
 github_org  = "devopswithjunaid"

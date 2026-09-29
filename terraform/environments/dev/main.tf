@@ -1,16 +1,18 @@
 # Root Module — Development Environment
 #
-# Dependency graph:
-#   module.kms ──┬──► module.vpc ──┐
-#                │                 ├──► module.eks
-#                └──► module.iam ──┘
-
-# ─── Data Sources ─────────────────────────────────────────────────────────────
+# Dependency order:
+#   module.kms ──► module.vpc
+#              ──► module.iam
+#   module.vpc ──► module.security ──► module.eks
+#   module.iam ──►                    module.eks
+#   module.kms ──►                    module.ecr
 
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
-# ─── KMS ──────────────────────────────────────────────────────────────────────
+# ─── KMS ─────────────────────────────────────────────────────────────────────
+# Must exist first — KMS key ARNs are consumed by VPC (EBS), EKS (Secrets),
+# ECR (images), and Security (CloudTrail) modules.
 
 module "kms" {
   source = "../../modules/kms"
@@ -38,7 +40,9 @@ module "vpc" {
   depends_on = [module.kms]
 }
 
-# ─── IAM (Human Access Roles & GitHub OIDC) ───────────────────────────────────
+# ─── IAM ──────────────────────────────────────────────────────────────────────
+# IAM roles (PlatformAdmin, Developer, ReadOnly, GitHub OIDC) are created
+# before EKS so their ARNs can be passed into EKS Access Entries.
 
 module "iam" {
   source = "../../modules/iam"
@@ -50,7 +54,29 @@ module "iam" {
   aws_account_id = data.aws_caller_identity.current.account_id
 }
 
+# ─── Security ─────────────────────────────────────────────────────────────────
+# VPC endpoints (eks-auth, s3, sts, ecr, cloudwatch), GuardDuty, CloudTrail.
+# Must exist after VPC (needs subnet IDs) and before EKS (node pods call eks-auth).
+
+module "security" {
+  source = "../../modules/security"
+
+  environment        = var.environment
+  project            = var.project
+  cluster_name       = var.cluster_name
+  vpc_id             = module.vpc.vpc_id
+  vpc_cidr           = var.vpc_cidr
+  private_subnet_ids = module.vpc.private_eks_subnet_ids
+  kms_key_arn        = module.kms.eks_key_arn
+  enable_guardduty   = var.enable_guardduty
+
+  depends_on = [module.vpc, module.kms]
+}
+
 # ─── EKS ──────────────────────────────────────────────────────────────────────
+# Consumes: vpc_id + private_eks_subnet_ids (VPC), kms key (KMS),
+#           role ARNs (IAM) for Access Entries.
+# Depends on security so VPC endpoints exist before nodes try to use them.
 
 module "eks" {
   source = "../../modules/eks"
@@ -90,20 +116,7 @@ module "eks" {
     }
   }
 
-  depends_on = [module.vpc, module.iam, module.kms]
-}
-
-# ─── Security ─────────────────────────────────────────────────────────────────
-
-module "security" {
-  source = "../../modules/security"
-
-  environment = var.environment
-  project     = var.project
-  vpc_id      = module.vpc.vpc_id
-  kms_key_arn = module.kms.eks_key_arn
-
-  depends_on = [module.vpc]
+  depends_on = [module.vpc, module.iam, module.kms, module.security]
 }
 
 # ─── ECR ──────────────────────────────────────────────────────────────────────
@@ -111,10 +124,11 @@ module "security" {
 module "ecr" {
   source = "../../modules/ecr"
 
-  environment  = var.environment
-  project      = var.project
-  repositories = var.ecr_repositories
-  kms_key_arn  = module.kms.ecr_key_arn
+  environment          = var.environment
+  project              = var.project
+  repositories         = var.ecr_repositories
+  kms_key_arn          = module.kms.ecr_key_arn
+  lifecycle_keep_count = 30
 
   depends_on = [module.kms]
 }

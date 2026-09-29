@@ -1,17 +1,5 @@
-# Provider Configuration
-#
-# WHY MULTIPLE PROVIDERS?
-# -----------------------
-# aws        - creates all AWS resources
-# kubernetes - manages Kubernetes cluster-level objects (after EKS exists)
-# helm       - installs Helm charts (Argo CD bootstrap)
-#
-# NOTE: kubernetes and helm providers depend on EKS being created first.
-# Terraform handles this via depends_on and provider configuration
-# that references EKS module outputs.
-
 terraform {
-  required_version = ">= 1.6.0"
+  required_version = ">= 1.10.0"
 
   required_providers {
     aws = {
@@ -33,7 +21,6 @@ terraform {
   }
 }
 
-# Primary AWS provider
 provider "aws" {
   region = var.aws_region
 
