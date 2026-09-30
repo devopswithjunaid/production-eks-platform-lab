@@ -55,15 +55,14 @@ resource "aws_iam_role" "readonly" {
 }
 
 # ─── 2. GitHub Actions OIDC Role ──────────────────────────────────────────────
+#
+# NOTE: GitHub's OIDC provider (token.actions.githubusercontent.com) is a
+# global per-account resource — only ONE can exist per AWS account.
+# We look up the existing one rather than creating it, which would fail with
+# EntityAlreadyExists if another project already registered it.
 
-resource "aws_iam_openid_connect_provider" "github" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
-
-  tags = merge(local.common_tags, {
-    Name = "${local.name_prefix}-github-oidc"
-  })
+data "aws_iam_openid_connect_provider" "github" {
+  url = "https://token.actions.githubusercontent.com"
 }
 
 data "aws_iam_policy_document" "github_actions_assume_role" {
@@ -73,7 +72,7 @@ data "aws_iam_policy_document" "github_actions_assume_role" {
 
     principals {
       type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github.arn]
+      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
     }
 
     condition {
